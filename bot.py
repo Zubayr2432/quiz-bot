@@ -292,8 +292,6 @@ def quiz_handler(update: Update, context: CallbackContext) -> None:
     questions = quizzes[quiz_name][:]
     random.shuffle(questions)
 
-    for q in questions:
-        random.shuffle(q["options"])
 
     context.user_data["questions"] = questions
     context.user_data["quiz_name"] = quiz_name
@@ -341,7 +339,7 @@ def send_next_question(update: Update, context: CallbackContext) -> None:
 def poll_answer_handler(update: Update, context: CallbackContext) -> None:
     """Foydalanuvchi so‘rovnomaga javob berganda uni tekshiradi."""
     poll_id = update.poll_answer.poll_id
-    user_choice = update.poll_answer.option_ids[0]
+    user_choice = update.poll_answer.option_ids[0] if update.poll_answer.option_ids else None
     chat_id = context.user_data.get("chat_id")
 
     if "polls" not in context.user_data or poll_id not in context.user_data["polls"]:
@@ -355,10 +353,11 @@ def poll_answer_handler(update: Update, context: CallbackContext) -> None:
 
     correct_index = questions[index]["correct"]
 
-    if user_choice == correct_index:
-        context.user_data["correct_count"] += 1
-    else:
-        context.user_data["wrong_count"] += 1
+    if user_choice is not None:  # Agar foydalanuvchi javob bergan bo'lsa
+        if user_choice == correct_index:
+            context.user_data["correct_count"] += 1
+        else:
+            context.user_data["wrong_count"] += 1
 
     context.user_data["question_index"] += 1
     send_next_question(update, context)
