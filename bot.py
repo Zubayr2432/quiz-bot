@@ -1,391 +1,753 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, PollAnswerHandler, CallbackContext
-import random
+import sqlite3
+import logging
+from datetime import datetime
+import asyncio
+from aiogram import Bot, Dispatcher, types, F, Router 
+from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, Message, ForceReply
+from aiogram.enums import ParseMode
 
-TOKEN = "7267797063:AAHjnlqhlLYU1rEAXf2S1VWLbKrTICagnak"
+# Enhanced configuration with type hints and better organization
+class Config:
+    CHANNEL_USERNAME = "ajoyib_kino_kodlari1"
+    CHANNEL_LINK = f"https://t.me/{CHANNEL_USERNAME}"
+    CHANNEL_ID = -1002341118048
+    CHANNEL_USERNAME_sh = "+ZRxWtd33UQc5YzQy"  # Hidden channel
+    CHANNEL_LINK_sh = f"https://t.me/{CHANNEL_USERNAME_sh}"
+    CHANNEL_ID_sh = -1002537276349
+    BOT_TOKEN = "7808158374:AAGMY8mkb0HVi--N2aJyRrPxrjotI6rnm7k"
+    ADMIN_IDS = [7871012050, 7183540853]  # Admins list
+    BATCH_SIZE = 30  # For bulk operations
+    BATCH_DELAY = 1  # Delay between batches in seconds
 
-quizzes = {
-    "quiz0": [
-    {"question": "Ko'rmoq/tushunmoq", "options": ["SEE", "LOOK", "NOTICE", "WATCH"], "correct": 0},
-    {"question": "Rohatlanmoq", "options": ["LIKE", "ENJOY", "PREFER", "LOVE"], "correct": 1},
-    {"question": "His qilmoq", "options": ["THINK", "FEEL", "EXPECT", "HOPE"], "correct": 1},
-    {"question": "Yoqtirmoq", "options": ["LOVE", "LIKE", "HATE", "DISLIKE"], "correct": 1},
-    {"question": "Yoqtirmaslik", "options": ["HATE", "DISLIKE", "DETEST", "AVOID"], "correct": 1},
-    {"question": "O'z ichiga olmoq", "options": ["INCLUDE", "CONTAIN", "FIT", "BELONG"], "correct": 0},
-    {"question": "Ahamiyat kasb etmoq", "options": ["MATTER", "BELONG", "MEAN", "KEEP"], "correct": 0},
-    {"question": "Muhtoj bo'lmoq", "options": ["REQUIRE", "NEED", "EXPECT", "WISH"], "correct": 0},
-    {"question": "Xohlamoq/tilak bildirmoq", "options": ["WISH", "WANT", "DESIRE", "PREFER"], "correct": 0},
-    {"question": "Sevmoq", "options": ["LIKE", "ENJOY", "LOVE", "ADORE"], "correct": 2},
-    {"question": "Nafratlanmoq", "options": ["HATE", "DISLIKE", "DETEST", "IGNORE"], "correct": 0},
-    {"question": "Tuyulmoq (tashqi ko'rinish)", "options": ["SEEM", "APPEAR", "LOOK", "SOUND"], "correct": 1},
-    {"question": "Tuyulmoq (holat)", "options": ["SEEM", "APPEAR", "SOUND", "LOOK"], "correct": 0},
-    {"question": "Ishonmoq", "options": ["BELIEVE", "SUPPOSE", "EXPECT", "TRUST"], "correct": 0},
-    {"question": "Tegishli bo'lmoq", "options": ["BELONG", "FIT", "INCLUDE", "OWN"], "correct": 0},
-    {"question": "Unutmoq", "options": ["REMEMBER", "FORGET", "IGNORE", "REGRET"], "correct": 1},
-    {"question": "Eshitmoq", "options": ["HEAR", "LISTEN", "NOTICE", "SOUND"], "correct": 0},
-    {"question": "Bilmoq", "options": ["KNOW", "UNDERSTAND", "THINK", "BELIEVE"], "correct": 0},
-    {"question": "Vaznga ega bo'lmoq", "options": ["WEIGH", "MEASURE", "FIT", "CONTAIN"], "correct": 0},
-    {"question": "Kutmoq", "options": ["EXPECT", "WISH", "HOPE", "SUPPOSE"], "correct": 0},
-    {"question": "Hurmat qilmoq", "options": ["LOVE", "ADORE", "APPRECIATE", "RESPECT"], "correct": 1},
-    {"question": "Ovozga nisbatan tuyulmoq", "options": ["SOUND", "SEEM", "APPEAR", "LOOK"], "correct": 0},
-    {"question": "Payqamoq", "options": ["NOTICE", "REALISE", "SEE", "LOOK"], "correct": 0},
-    {"question": "Egalik qilmoq", "options": ["OWN", "HAVE", "KEEP", "BELONG"], "correct": 0},
-    {"question": "Saqlamoq", "options": ["KEEP", "HAVE", "OWN", "BELONG"], "correct": 0},
-    {"question": "Arzimoq/qiymatga ega bo'lmoq", "options": ["COST", "PRICE", "VALUE", "WORTH"], "correct": 0},
-    {"question": "Qarzdor bo'lib qolmoq", "options": ["OWE", "PAY", "OWN", "BORROW"], "correct": 0},
-    {"question": "Kerak bo'lmoq", "options": ["NEED", "REQUIRE", "EXPECT", "WANT"], "correct": 0},
-    {"question": "Shikast yetkazmoq/og'rimoq", "options": ["HURT", "ACHE", "PAIN", "INJURE"], "correct": 0},
-    {"question": "Og'rimoq", "options": ["ACHE", "HURT", "PAIN", "SORE"], "correct": 0},
-    {"question": "Eslamoq", "options": ["REMEMBER", "FORGET", "NOTICE", "RECOGNISE"], "correct": 0},
-    {"question": "Hid taratmoq", "options": ["SMELL", "TASTE", "SCENT", "AROMA"], "correct": 0},
-    {"question": "O'ylamoq", "options": ["THINK", "SUPPOSE", "BELIEVE", "IMAGINE"], "correct": 0},
-    {"question": "Tushunmoq", "options": ["UNDERSTAND", "KNOW", "THINK", "REALISE"], "correct": 0},
-    {"question": "Afzal ko'rmoq", "options": ["PREFER", "LIKE", "WANT", "CHOOSE"], "correct": 0},
-    {"question": "Anglab yetmoq", "options": ["REALISE", "RECOGNISE", "KNOW", "NOTICE"], "correct": 0},
-    {"question": "Tanimoq", "options": ["RECOGNISE", "REMEMBER", "REALISE", "ACKNOWLEDGE"], "correct": 0},
-    {"question": "Deb hisoblamoq", "options": ["SUPPOSE", "EXPECT", "BELIEVE", "THINK"], "correct": 0},
-    {"question": "Anglatmoq", "options": ["MEAN", "DEFINE", "EXPLAIN", "SUPPOSE"], "correct": 0},
-    {"question": "Mos kelmoq", "options": ["FIT", "INCLUDE", "BELONG", "MEASURE"], "correct": 0},
-    {"question": "Ta'm bermoq", "options": ["TASTE", "SMELL", "FLAVOUR", "EAT"], "correct": 0},
-    {"question": "Rozi bo'lmoq", "options": ["AGREE", "ACCEPT", "ALLOW", "APPROVE"], "correct": 0},
-    {"question": "Rad qilmoq", "options": ["DENY", "REFUSE", "DISAGREE", "IGNORE"], "correct": 0},
-    {"question": "Juda yomon ko'rmoq", "options": ["DETEST", "HATE", "DISLIKE", "AVOID"], "correct": 0},
-    {"question": "Qattiq istamoq", "options": ["DESIRE", "WISH", "WANT", "PREFER"], "correct": 0},
-    {"question": "Shubhalanmoq", "options": ["DOUBT", "SUPPOSE", "BELIEVE", "MEAN"], "correct": 0},
-    {"question": "Hasad/rashk qilmoq", "options": ["ENVY", "HATE", "DISLIKE", "DETEST"], "correct": 0},
-    {"question": "Ko‘rinmoq/tuyulmoq", "options": ["LOOK", "SEEM", "APPEAR", "NOTICE"], "correct": 0},
-    {"question": "Tasavvur qilmoq", "options": ["IMAGINE", "THINK", "BELIEVE", "EXPECT"], "correct": 0},
-    {"question": "Umid qilmoq", "options": ["HOPE", "EXPECT", "WISH", "BELIEVE"], "correct": 0},
-    {"question": "Keçhirmoq", "options": ["FORGIVE", "FORGET", "IGNORE", "REMEMBER"], "correct": 0}
-],
-    "quiz1":[
-    {
-        "question": "Yo’q bo‘lmoq",
-        "options": ["Absent from", "Accompanied by", "According to", "Account for"],
-        "correct": 0
-    },
-    {
-        "question": "Bilan hamroh",
-        "options": ["Accuse smb of", "Accompanied by", "Afraid of", "Account for"],
-        "correct": 1
-    },
-    {
-        "question": "… ga muvofiq",
-        "options": ["Advantage of", "Advice on", "According to", "Addicted to"],
-        "correct": 2
-    },
-    {
-        "question": "Hisobga olmoq",
-        "options": ["Account for", "Accompanied by", "Absent from", "Afraid of"],
-        "correct": 0
-    },
-    {
-        "question": "Ayblamoq",
-        "options": ["Accused smb of", "Afraid of", "Addicted to", "Account for"],
-        "correct": 0
-    },
-    {
-        "question": "Odatlangan",
-        "options": ["According to", "Afraid of", "Accustomed to", "Advice on"],
-        "correct": 2
-    },
-    {
-        "question": "Berilib ketgan",
-        "options": ["Addicted to", "Advantage of", "Account for", "Accompanied by"],
-        "correct": 0
-    },
-    {
-        "question": "Ustunlik, afzallik",
-        "options": ["Absent from", "Advantage of", "Account for", "According to"],
-        "correct": 1
-    },
-    {
-        "question": "Maslahat",
-        "options": ["Afraid of", "Account for", "Advice on", "Absent from"],
-        "correct": 2
-    },
-    {
-        "question": "Qo‘rqqan",
-        "options": ["Accompanied by", "Accuse smb of", "Afraid of", "Advantage of"],
-        "correct": 2
-    }
-],
-    "quiz2": [
-    {
-        "question": "Ko’nmoq, rozi bo‘lmoq",
-        "options": ["Agree to", "Agree on smth", "Agree with smb", "Ahead of"],
-        "correct": 0
-    },
-    {
-        "question": "Kelishmoq",
-        "options": ["Ahead of", "Agree on smth", "Agree with smb", "Aim at"],
-        "correct": 1
-    },
-    {
-        "question": "Hamfikr bo‘lmoq, rozi bo‘lmoq",
-        "options": ["Agree with smb", "Allergic to", "Amazed at/by", "Angry at what smb does"],
-        "correct": 0
-    },
-    {
-        "question": "Oldida",
-        "options": ["Aim at", "Agree on smth", "Ahead of", "Amused at/with"],
-        "correct": 2
-    },
-    {
-        "question": "Maqsad",
-        "options": ["Agree to", "Allergic to", "Aim at", "Amazed at/by"],
-        "correct": 2
-    },
-    {
-        "question": "Allergiyali",
-        "options": ["Agree with smb", "Agree on smth", "Allergic to", "Angry with smb about smth"],
-        "correct": 2
-    },
-    {
-        "question": "Hayratda qolgan",
-        "options": ["Angry at what smb does", "Amazed at/by", "Agree to", "Amused at/with"],
-        "correct": 1
-    },
-    {
-        "question": "Xursand",
-        "options": ["Angry with smb about smth", "Amazed at/by", "Amused at/with", "Agree with smb"],
-        "correct": 2
-    },
-    {
-        "question": "Jahl chiqmoq (kimdandir nimadir haqida)",
-        "options": ["Angry at what smb does", "Agree to", "Angry with smb about smth", "Aim at"],
-        "correct": 2
-    },
-    {
-        "question": "Jahl chiqmoq (kimningdir qilgan ishidan)",
-        "options": ["Allergic to", "Ahead of", "Amazed at/by", "Angry at what smb does"],
-        "correct": 3
-    }
-],
-    "quiz3":[
-    {
-        "question": "Jahl chiqmoq (kimdandir nimadir qilgani uchun)",
-        "options": ["Angry with smb for doing smth", "Annoyed with smb about smth", "Anxious about smth", "Apply to smb for smth"],
-        "correct": 0
-    },
-    {
-        "question": "Achchiqlanmoq (nimadir haqida)",
-        "options": ["Annoyed with smb about smth", "Apologize to smb for smth", "Appeal to/against", "Approve of"],
-        "correct": 0
-    },
-    {
-        "question": "Javob",
-        "options": ["Answer to", "Anxious about smth", "Apply to smb for smth", "Appeal to smb for smth"],
-        "correct": 0
-    },
-    {
-        "question": "Xavotirlanmoq, tashvishlanmoq",
-        "options": ["Approve of", "Angry with smb for doing smth", "Anxious about smth", "Appeal to/against"],
-        "correct": 2
-    },
-    {
-        "question": "Xavotirlanmoq (nimadir sodir bo‘lishini kutib)",
-        "options": ["Apply to smb for smth", "Anxious for smth to happen", "Apologize to smb for smth", "Annoyed with smb about smth"],
-        "correct": 1
-    },
-    {
-        "question": "Kechirim so‘ramoq",
-        "options": ["Approve of", "Appeal to smb for smth", "Apologize to smb for smth", "Answer to"],
-        "correct": 2
-    },
-    {
-        "question": "Shikoyat qilmoq",
-        "options": ["Anxious about smth", "Appeal to smb for smth", "Apply to smb for smth", "Annoyed with smb about smth"],
-        "correct": 1
-    },
-    {
-        "question": "Appilyatsiya bermoq",
-        "options": ["Appeal to/against", "Answer to", "Approve of", "Apologize to smb for smth"],
-        "correct": 0
-    },
-    {
-        "question": "Murojaat qilmoq",
-        "options": ["Answer to", "Anxious for smth to happen", "Apply to smb for smth", "Angry with smb for doing smth"],
-        "correct": 2
-    },
-    {
-        "question": "Ma’qullamoq",
-        "options": ["Apply to smb for smth", "Appeal to/against", "Approve of", "Answer to"],
-        "correct": 2
-    }
-],
-    "quiz4": [
-    {
-        "question": "Bahslashmoq",
-        "options": ["Argue with smb about smth", "Arrest smb for smth", "Arrive at", "Arrive in"],
-        "correct": 0
-    },
-    {
-        "question": "Xibsga olmoq",
-        "options": ["Arrive at", "Ask for", "Arrest smb for smth", "Attach to"],
-        "correct": 2
-    },
-    {
-        "question": "Yetib kelmoq (kichik joyga)",
-        "options": ["Arrive at", "Arrive in", "Ashamed of", "Astonished at/by"],
-        "correct": 0
-    },
-    {
-        "question": "Yetib kelmoq (atoqli joyga)",
-        "options": ["Arrive at", "Arrive in", "Assure smb of", "Attach to"],
-        "correct": 1
-    },
-    {
-        "question": "Uyalgan",
-        "options": ["Ashamed of", "Attach to", "Astonished at/by", "Ask for"],
-        "correct": 0
-    },
-    {
-        "question": "So‘ramoq",
-        "options": ["Assure smb of", "Ask for", "Astonished at/by", "Attach to"],
-        "correct": 1
-    },
-    {
-        "question": "Ishontirmoq",
-        "options": ["Argue with smb about smth", "Arrest smb for smth", "Assure smb of", "Arrive at"],
-        "correct": 2
-    },
-    {
-        "question": "Hayratda qolgan",
-        "options": ["Attach to", "Astonished at/by", "Arrive at", "Ashamed of"],
-        "correct": 1
-    },
-    {
-        "question": "Mahkamlamoq",
-        "options": ["Attach to", "Ask for", "Arrive in", "Arrest smb for smth"],
-        "correct": 0
-    },
-    {
-        "question": "Ko‘ngil qo‘ymoq (m-n: pulga)",
-        "options": ["Assure smb of", "Attach for smth", "Argue with smb about smth", "Ashamed of"],
-        "correct": 1
-    }
-]
+# Improved logging setup
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('bot.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
-}
+# Initialize bot with better error handling
+try:
+    bot = Bot(token=Config.BOT_TOKEN, parse_mode=ParseMode.HTML)
+    storage = MemoryStorage()
+    dp = Dispatcher(storage=storage)
+    router = Router()
+except Exception as e:
+    logger.critical(f"Failed to initialize bot: {e}")
+    raise
 
-def start_command(update: Update, context: CallbackContext) -> None:
-    """Foydalanuvchiga test tanlash uchun tugmachalarni chiqaradi."""
-    show_quiz_options(update.message)
+# Database class with connection pooling and better error handling
+class Database:
+    _instance = None
 
-def show_quiz_options(message) -> None:
-    keyboard = [[InlineKeyboardButton(f"Quiz {i}", callback_data=f"quiz{i}")] for i in range(5)]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    message.reply_text("Qaysi testni ishlaysiz?", reply_markup=reply_markup)
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            try:
+                cls._instance.conn = sqlite3.connect(
+                    'kino.db',
+                    check_same_thread=False,
+                    timeout=30,
+                    isolation_level=None
+                )
+                cls._instance.conn.row_factory = sqlite3.Row
+                cls._instance.create_tables()
+                logger.info("Database connection established")
+            except sqlite3.Error as e:
+                logger.error(f"Database connection failed: {e}")
+                raise
+        return cls._instance
 
-def quiz_handler(update: Update, context: CallbackContext) -> None:
-    """Testni boshlaydi va savollarni yuboradi."""
-    query = update.callback_query
-    query.answer()
-    chat_id = query.message.chat_id
-    quiz_name = query.data
+    def create_tables(self):
+        """Create database tables with better schema"""
+        tables = [
+            '''CREATE TABLE IF NOT EXISTS kinolar (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kod INTEGER UNIQUE,
+                nomi TEXT,
+                file_id TEXT,
+                kanal_msg_id INTEGER,
+                sana TEXT DEFAULT CURRENT_TIMESTAMP,
+                views INTEGER DEFAULT 0)''',
+                
+            '''CREATE TABLE IF NOT EXISTS adminlar (
+                user_id INTEGER PRIMARY KEY,
+                ism TEXT,
+                added_at TEXT DEFAULT CURRENT_TIMESTAMP)''',
+                
+            '''CREATE TABLE IF NOT EXISTS foydalanuvchilar (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                full_name TEXT,
+                joined_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                last_active TEXT)''',
+                
+            '''CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                admin_id INTEGER,
+                message_text TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(user_id) REFERENCES foydalanuvchilar(user_id))'''
+        ]
+        
+        try:
+            with self.conn:
+                for table in tables:
+                    self.conn.execute(table)
+                
+                # Add default admin if not exists
+                for admin_id in Config.ADMIN_IDS:
+                    self.conn.execute(
+                        "INSERT OR IGNORE INTO adminlar (user_id, ism) VALUES (?, ?)", 
+                        (admin_id, "Admin")
+                    )
+                self.conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"Database table creation error: {e}")
+            raise
 
-    if quiz_name not in quizzes or not quizzes[quiz_name]:
-        query.message.reply_text("Bu testda savollar yo‘q.")
+    def add_user(self, user: types.User):
+        """Add user with complete info"""
+        try:
+            self.execute(
+                """INSERT OR IGNORE INTO foydalanuvchilar 
+                (user_id, username, full_name, last_active) 
+                VALUES (?, ?, ?, datetime('now'))""",
+                (user.id, user.username, user.full_name),
+                commit=True
+            )
+            # Update last active time
+            self.execute(
+                "UPDATE foydalanuvchilar SET last_active = datetime('now') WHERE user_id = ?",
+                (user.id,),
+                commit=True
+            )
+            return True
+        except sqlite3.Error as e:
+            logger.error(f"Add user error: {e}")
+            return False
+
+    def execute(self, query, params=(), fetchone=False, fetchall=False, commit=False):
+        """Improved execute with retry logic"""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                cur = self.conn.cursor()
+                cur.execute(query, params)
+                if commit:
+                    self.conn.commit()
+                if fetchone:
+                    return cur.fetchone()
+                if fetchall:
+                    return cur.fetchall()
+                return None
+            except sqlite3.OperationalError as e:
+                if "locked" in str(e) and attempt < max_retries - 1:
+                    logger.warning(f"Database locked, retrying... (attempt {attempt + 1})")
+                    time.sleep(0.5)
+                    continue
+                logger.error(f"SQL Error: {e}")
+                return None
+            except sqlite3.Error as e:
+                logger.error(f"SQL Error: {e}")
+                return None
+
+    def close(self):
+        """Close connection properly"""
+        try:
+            if self.conn:
+                self.conn.close()
+                logger.info("Database connection closed")
+        except Exception as e:
+            logger.error(f"Error closing database: {e}")
+
+# States with better organization
+class AdminState(StatesGroup):
+    kino_nomi = State()
+    kino_qoshish = State()
+    kino_ochirish = State()
+    reklama = State()
+    contact_admin = State()
+    add_admin = State()
+    remove_admin = State()
+
+# Helper functions with better error handling
+async def check_subscription(user_id: int) -> bool:
+    """Check if user is subscribed to channel with retry logic"""
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            member = await bot.get_chat_member(chat_id=Config.CHANNEL_ID, user_id=user_id)
+            return member.status in ['member', 'administrator', 'creator']
+        except Exception as e:
+            if attempt == max_retries - 1:
+                logger.error(f"Subscription check failed: {e}")
+                return False
+            await asyncio.sleep(1)
+
+async def ask_for_subscription(message: types.Message):
+    """Improved subscription request with better keyboard"""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📢 Kanalga o'tish", url=Config.CHANNEL_LINK)
+    builder.button(text="✅ Obuna bo'ldim", callback_data="check_subscription")
+    builder.adjust(1)
+
+    await message.answer(
+        "🤖 Botdan to'liq foydalanish uchun quyidagi kanalga obuna bo'ling:\n"
+        f"{Config.CHANNEL_LINK}\n\n"
+        "Obuna bo'lgach, <b>'✅ Obuna bo'ldim'</b> tugmasini bosing.",
+        reply_markup=builder.as_markup(),
+        disable_web_page_preview=True
+    )
+
+async def is_admin(user_id: int) -> bool:
+    """Check if user is admin with caching"""
+    return user_id in Config.ADMIN_IDS
+
+async def save_to_database(content_type: str, content_data: dict, code: int = None) -> bool:
+    """Generic content saving to database"""
+    db = Database()
+    try:
+        if content_type == "movie":
+            db.execute(
+                """INSERT INTO kinolar (kod, nomi, file_id) 
+                VALUES (?, ?, ?)""",
+                (code, content_data['nomi'], content_data['file_id']),
+                commit=True
+            )
+            return True
+        # Add other content types as needed
+    except Exception as e:
+        logger.error(f"Save to DB failed: {e}")
+        return False
+
+# ========================
+# HANDLERS IMPROVEMENTS
+# ========================
+
+@dp.message(CommandStart())
+async def start_cmd(message: types.Message):
+    """Enhanced start command with user tracking"""
+    user = message.from_user
+    db = Database()
+    
+    # Save/update user info
+    db.add_user(user)
+    
+    # Check subscription
+    if not await check_subscription(user.id):
+        await ask_for_subscription(message)
         return
+    
+    # Welcome message with better formatting
+    welcome_msg = (
+        "🎉 <b>Botdan foydalanishga xush kelibsiz!</b>\n\n"
+        "Quyidagi menyudan kerakli bo'limni tanlang yoki kino kodini yuboring.\n\n"
+        f"🔍 Kino izlash uchun kodni yuboring\n"
+        f"📞 Savol uchun 'Adminga murojaat' tugmasini bosing\n\n"
+        f"📢 Bizning kanal: {Config.CHANNEL_LINK}"
+    )
+    
+    builder = ReplyKeyboardBuilder()
+    builder.button(text="📞 Adminga murojaat")
+    builder.adjust(2)
+    
+    await message.answer(welcome_msg, reply_markup=builder.as_markup(resize_keyboard=True))
 
-    questions = quizzes[quiz_name][:]
-    random.shuffle(questions)
-
-
-    context.user_data["questions"] = questions
-    context.user_data["quiz_name"] = quiz_name
-    context.user_data["question_index"] = 0
-    context.user_data["correct_count"] = 0
-    context.user_data["wrong_count"] = 0
-    context.user_data["polls"] = {}
-    context.user_data["chat_id"] = chat_id  # So‘rovnoma ishlashi uchun kerak
-
-    send_next_question(update, context)
-
-def send_next_question(update: Update, context: CallbackContext) -> None:
-    """Keyingi savolni yuboradi yoki test tugaganligini bildiradi."""
-    chat_id = context.user_data.get("chat_id")
-    questions = context.user_data.get("questions", [])
-    index = context.user_data.get("question_index", 0)
-
-    if index < len(questions):
-        question = questions[index]
-        options = question["options"]
-        correct_index = question["correct"]
-
-        poll_message = context.bot.send_poll(
-            chat_id=chat_id,
-            question=question["question"],
-            options=options,
-            type="quiz",
-            correct_option_id=correct_index,
-            is_anonymous=False
-        )
-
-        context.user_data["polls"][poll_message.poll.id] = index
+@dp.callback_query(F.data == "check_subscription")
+async def verify_subscription(query: types.CallbackQuery):
+    """Subscription verification with better flow"""
+    user = query.from_user
+    
+    if await check_subscription(user.id):
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.warning(f"Message delete failed: {e}")
+        
+        await query.answer("✅ Obuna tasdiqlandi!", show_alert=True)
+        await start_cmd(query.message)
     else:
-        correct = context.user_data.get("correct_count", 0)
-        wrong = context.user_data.get("wrong_count", 0)
-        total = correct + wrong
-        result_text = f"✅ Test tugadi!\n📊 Statistikangiz:\n✅ To‘g‘ri javoblar: {correct}/{total}\n❌ Noto‘g‘ri javoblar: {wrong}/{total}"
+        await query.answer("❌ Obuna tasdiqlanmadi!", show_alert=True)
+        await ask_for_subscription(query.message)
 
-        keyboard = [[InlineKeyboardButton(f"Quiz {i}", callback_data=f"quiz{i}")] for i in range(5)]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+# Admin panel with more features
+@dp.message(Command("admin"))
+async def admin_panel(message: types.Message):
+    """Enhanced admin panel with more options"""
+    if not await is_admin(message.from_user.id):
+        await message.answer("⛔ Ruxsat yo'q!")
+        return
+    
+    admin_menu = (
+        "👨‍💻 <b>Admin panel</b>\n\n"
+        "Quyidagi amallardan birini tanlang:"
+    )
+    
+    builder = ReplyKeyboardBuilder()
+    builder.button(text="🎬 Kino qo'shish")
+    builder.button(text="🗑 Kino o'chirish")
+    builder.button(text="📊 Statistika")
+    builder.button(text="📢 Reklama yuborish")
+    builder.button(text="⬅️ Asosiy menyu")
+    builder.adjust(2, 2, 2)
+    
+    await message.answer(admin_menu, reply_markup=builder.as_markup(resize_keyboard=True))
 
-        context.bot.send_message(chat_id=chat_id, text=result_text)
-        context.bot.send_message(chat_id=chat_id, text="Qaysi testni ishlaysiz?", reply_markup=reply_markup)
+# Movie addition with better flow
+@dp.message(F.text == "🎬 Kino qo'shish")
+async def start_add_movie(message: types.Message, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        return
+    
+    await message.answer(
+        "🎥 <b>Yangi kino qo'shish</b>\n\n"
+        "Kino nomini yuboring:",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="◀️ Ortga")]],
+            resize_keyboard=True
+        )
+    )
+    await state.set_state(AdminState.kino_nomi)
 
-def poll_answer_handler(update: Update, context: CallbackContext) -> None:
-    """Foydalanuvchi so‘rovnomaga javob berganda uni tekshiradi."""
-    poll_id = update.poll_answer.poll_id
-    user_choice = update.poll_answer.option_ids[0] if update.poll_answer.option_ids else None
-    chat_id = context.user_data.get("chat_id")
+@dp.message(AdminState.kino_nomi)
+async def process_movie_name(message: types.Message, state: FSMContext):
+    if message.text == "◀️ Ortga":
+        await state.clear()
+        await admin_panel(message)
+        return
+    
+    await state.update_data(nomi=message.text)
+    await message.answer(
+        "📹 Endi kino videosini yuboring:",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="◀️ Ortga")]],
+            resize_keyboard=True
+        )
+    )
+    await state.set_state(AdminState.kino_qoshish)
 
-    if "polls" not in context.user_data or poll_id not in context.user_data["polls"]:
+@dp.message(AdminState.kino_qoshish)
+async def process_movie(message: types.Message, state: FSMContext):
+    if message.text == "◀️ Ortga":
+        await state.clear()
+        await admin_panel(message)
         return
 
-    index = context.user_data["polls"].pop(poll_id)
-    questions = context.user_data.get("questions", [])
-
-    if index >= len(questions):
+    if not message.video:
+        await message.answer("❌ Faqat video qabul qilinadi!")
         return
+    
+    data = await state.get_data()
+    nomi = data.get("nomi", "Nomsiz")
+    
+    # Generate new code
+    db = Database()
+    new_code = db.execute("SELECT MAX(kod) FROM kinolar", fetchone=True)[0] or 1000
+    new_code += 1
+    
+    # Save to channel and database
+    try:
+        # Post to main channel
+        bot_username = (await bot.get_me()).username
+        caption = (
+            f"🎬 <b>{nomi}</b>\n\n"
+            f"🔢 Kodi: <code>{new_code}</code>\n\n"
+            f"📥 @{bot_username} orqali yuklab olish mumkin\n"
+            f"🔗 Kanal: {Config.CHANNEL_LINK}"
+        )
+        
+        msg = await bot.send_message(
+            chat_id=Config.CHANNEL_ID_sh,
+            text=caption
+        )
+        
+        await bot.send_video(
+            chat_id=Config.CHANNEL_ID_sh,
+            video=message.video.file_id,
+            reply_to_message_id=msg.message_id,
+            caption=caption
+        )
+        
+        # Save to database
+        db.execute(
+            "INSERT INTO kinolar (kod, nomi, file_id, kanal_msg_id) VALUES (?, ?, ?, ?)",
+            (new_code, nomi, message.video.file_id, msg.message_id),
+            commit=True
+        )
+        
+        # Success message
+        success_msg = (
+            f"✅ <b>Kino muvaffaqiyatli qo'shildi!</b>\n\n"
+            f"📝 Nomi: {nomi}\n"
+            f"🔢 Kodi: <code>{new_code}</code>\n"
+            f"🔗 <a href='https://t.me/{Config.CHANNEL_USERNAME}/{msg.message_id}'>Kanaldagi post</a>"
+        )
+        await message.answer(success_msg)
+        
+    except Exception as e:
+        logger.error(f"Movie addition failed: {e}")
+        await message.answer(f"❌ Xatolik: {str(e)}")
+    
+    await state.clear()
 
-    correct_index = questions[index]["correct"]
+@dp.message(F.text == "🗑 Kino o'chirish")
+async def start_delete_movie(message: types.Message, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        return
+    
+    await message.answer("O'chirmoqchi bo'lgan kino kodini yuboring:")
+    await state.set_state(AdminState.kino_ochirish)
 
-    if user_choice is not None:  # Agar foydalanuvchi javob bergan bo'lsa
-        if user_choice == correct_index:
-            context.user_data["correct_count"] += 1
+@dp.message(AdminState.kino_ochirish)
+async def process_delete_movie(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("❌ Iltimos, faqat raqam yuboring!")
+        return
+    
+    kod = int(message.text)
+    db = Database()
+    
+    try:
+        result = db.execute("SELECT kanal_msg_id FROM kinolar WHERE kod=?", (kod,), fetchone=True)
+        
+        if result:
+            try:
+                await bot.delete_message(chat_id=f"@{Config.CHANNEL_USERNAME}", message_id=result["kanal_msg_id"])
+            except Exception as e:
+                logger.warning(f"Error deleting channel message: {e}")
+            
+            db.execute("DELETE FROM kinolar WHERE kod=?", (kod,), commit=True)
+            await message.answer(f"✅ {kod}-kodli kino muvaffaqiyatli o'chirildi!")
         else:
-            context.user_data["wrong_count"] += 1
+            await message.answer("❌ Bunday kodli kino topilmadi!")
+    
+    except Exception as e:
+        await message.answer(f"❌ Xatolik yuz berdi: {str(e)}")
+    
+    finally:
+        await state.clear()
 
-    context.user_data["question_index"] += 1
-    send_next_question(update, context)
-
-def add_question(update: Update, context: CallbackContext) -> None:
-    """Yangi savol qo‘shish."""
-    args = context.args
-    if len(args) < 5:
-        update.message.reply_text("Format: /addquiz quizX Savol javob1 javob2 javob3 to‘g‘ri_javob_index")
+# Statistics with more details
+@dp.message(F.text == "📊 Statistika")
+async def show_stats(message: types.Message):
+    if not await is_admin(message.from_user.id):
         return
-    quiz_name, question, *options, correct = args
-    if quiz_name not in quizzes:
-        quizzes[quiz_name] = []
-    quizzes[quiz_name].append({"question": question, "options": options, "correct": int(correct)})
-    update.message.reply_text("Savol qo‘shildi!")
+    
+    db = Database()
+    
+    try:
+        # Get movie stats
+        movie_stats = db.execute(
+            "SELECT COUNT(*) as count, MIN(sana) as first_date, MAX(sana) as last_date FROM kinolar",
+            fetchone=True
+        )
+        
+        # Get user stats
+        user_stats = db.execute(
+            "SELECT COUNT(*) as total, "
+            "SUM(CASE WHEN last_active > datetime('now', '-1 day') THEN 1 ELSE 0 END) as active_today "
+            "FROM foydalanuvchilar",
+            fetchone=True
+        )
+        
+        # Format stats message
+        stats_msg = (
+            "📊 <b>Bot statistikasi</b>\n\n"
+            "🎬 <b>Kinolar:</b>\n"
+            f"• Jami: {movie_stats['count']}\n"
+            f"• Birinchi: {movie_stats['first_date'] or 'N/A'}\n"
+            f"• Oxirgi: {movie_stats['last_date'] or 'N/A'}\n\n"
+            "👥 <b>Foydalanuvchilar:</b>\n"
+            f"• Jami: {user_stats['total']}\n"
+            f"• Faol (24 soat): {user_stats['active_today']}\n\n"
+            f"🔗 Kanal: {Config.CHANNEL_LINK}"
+        )
+        
+        await message.answer(stats_msg)
+        
+    except Exception as e:
+        logger.error(f"Stats error: {e}")
+        await message.answer("❌ Statistika olishda xatolik")
 
-def main():
-    updater = Updater(TOKEN, use_context=True)
-    dp = updater.dispatcher
+# Enhanced advertisement sending
+@dp.message(F.text == "📢 Reklama yuborish")
+async def start_advertisement(message: types.Message, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        return
+    
+    await message.answer(
+        "✍️ Reklama matnini yuboring yoki media (rasm, video, fayl) jo'nating:",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="◀️ Ortga")]],
+            resize_keyboard=True
+        )
+    )
+    await state.set_state(AdminState.reklama)
 
-    dp.add_handler(CommandHandler("start", start_command))
-    dp.add_handler(CommandHandler("addquiz", add_question))
-    dp.add_handler(CallbackQueryHandler(quiz_handler, pattern="^quiz[0-4]$"))
-    dp.add_handler(PollAnswerHandler(poll_answer_handler))
+@dp.message(AdminState.reklama)
+async def send_advertisement(message: types.Message, state: FSMContext):
+    if message.text == "◀️ Ortga":
+        await state.clear()
+        await admin_panel(message)
+        return
+    
+    # Prepare content
+    content = {
+        'type': message.content_type,
+        'text': message.text or message.caption or "",
+        'file_id': getattr(message, message.content_type).file_id if message.content_type != 'text' else None
+    }
+    
+    # Get all users
+    db = Database()
+    users = [row['user_id'] for row in db.execute("SELECT user_id FROM foydalanuvchilar", fetchall=True)]
+    
+    if not users:
+        await message.answer("⚠️ Hozircha foydalanuvchilar yo'q!")
+        return
+    
+    # Send with progress
+    total = len(users)
+    success = 0
+    progress_msg = await message.answer(f"📤 Yuborilmoqda... 0/{total} (0%)")
+    
+    for i, user_id in enumerate(users, 1):
+        try:
+            if content['type'] == 'text':
+                await bot.send_message(user_id, content['text'])
+            else:
+                method = getattr(bot, f"send_{content['type']}")
+                await method(user_id, content['file_id'], caption=content['text'])
+            success += 1
+        except Exception as e:
+            logger.warning(f"Failed to send to {user_id}: {e}")
+        
+        # Update progress every 10 users or last one
+        if i % 10 == 0 or i == total:
+            percent = int((i / total) * 100)
+            await progress_msg.edit_text(
+                f"📤 Yuborilmoqda... {i}/{total} ({percent}%)\n"
+                f"✅ Muvaffaqiyatli: {success}\n"
+                f"❌ Xatolar: {i - success}"
+            )
+            await asyncio.sleep(Config.BATCH_DELAY)
+    
+    # Final report
+    await progress_msg.delete()
+    await message.answer(
+        f"✅ Reklama yuborish yakunlandi!\n\n"
+        f"📊 Natijalar:\n"
+        f"• Jami: {total}\n"
+        f"• Muvaffaqiyatli: {success}\n"
+        f"• Xatolar: {total - success}",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="⬅️ Asosiy menyu")]],
+            resize_keyboard=True
+        )
+    )
+    await state.clear()
 
-    print("Bot ishga tushdi...")
-    updater.start_polling()
-    updater.idle()
 
-if __name__ == "__main__":
-    main()
+# Movie search by code
+@dp.message(lambda message: message.text.isdigit())
+async def send_movie_by_code(message: types.Message):
+    # Check subscription first
+    if not await check_subscription(message.from_user.id):
+        await ask_for_subscription(message)
+        return
+    
+    code = int(message.text)
+    db = Database()
+    movie = db.execute("SELECT nomi, file_id FROM kinolar WHERE kod = ?", (code,), fetchone=True)
+    
+    if not movie:
+        await message.answer(
+            f"❌ {code}-kodli kino topilmadi!\n\n"
+            f"🔍 Kanalda barcha kinolar: {Config.CHANNEL_LINK}",
+            disable_web_page_preview=True
+        )
+        return
+    
+    # Send movie
+    try:
+        await message.answer_video(
+            video=movie['file_id'],
+            caption=f"🎬 <b>{movie['nomi']}</b>\n\n🔢 Kodi: <code>{code}</code>"
+        )
+        # Increment view count
+        db.execute("UPDATE kinolar SET views = views + 1 WHERE kod = ?", (code,), commit=True)
+    except Exception as e:
+        logger.error(f"Movie send failed: {e}")
+        await message.answer("❌ Kino yuborishda xatolik")
+
+# Contact admin with better tracking
+@dp.message(F.text == "📞 Adminga murojaat")
+async def contact_admin(message: types.Message, state: FSMContext):
+    await message.answer(
+        "✍️ Xabaringizni yuboring (matn, rasm, video yoki fayl):\n\n"
+        "Adminlar tez orada javob berishadi.",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="◀️ Bekor qilish")]],
+            resize_keyboard=True
+        )
+    )
+    await state.set_state(AdminState.contact_admin)
+
+@dp.message(AdminState.contact_admin)
+async def forward_to_admin(message: types.Message, state: FSMContext):
+    if message.text == "◀️ Bekor qilish":
+        await state.clear()
+        await start_cmd(message)
+        return
+    
+    user = message.from_user
+    user_info = (
+        f"👤 <b>Foydalanuvchi:</b> {user.full_name}\n"
+        f"🆔 ID: <code>{user.id}</code>\n"
+        f"📅 Sana: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+    )
+    
+    try:
+        if message.text:
+            caption = f"{user_info}📝 Xabar: {message.text}"
+            content = {'type': 'text', 'text': caption}
+        elif message.photo:
+            caption = f"{user_info}📷 Rasm"
+            content = {'type': 'photo', 'file_id': message.photo[-1].file_id, 'caption': caption}
+        elif message.video:
+            caption = f"{user_info}🎥 Video"
+            content = {'type': 'video', 'file_id': message.video.file_id, 'caption': caption}
+        elif message.document:
+            caption = f"{user_info}📄 Fayl: {message.document.file_name}"
+            content = {'type': 'document', 'file_id': message.document.file_id, 'caption': caption}
+        else:
+            await message.answer("❌ Qabul qilinmaydigan format")
+            return
+        
+        # Forward to all admins
+        for admin_id in Config.ADMIN_IDS:
+            try:
+                if content['type'] == 'text':
+                    await bot.send_message(
+                        admin_id,
+                        content['text'],
+                        reply_markup=ForceReply()
+                    )
+                else:
+                    method = getattr(bot, f"send_{content['type']}")
+                    await method(
+                        admin_id,
+                        content['file_id'],
+                        caption=content.get('caption'),
+                        reply_markup=ForceReply()
+                    )
+            except Exception as e:
+                logger.error(f"Failed to forward to admin {admin_id}: {e}")
+        
+        await message.answer(
+            "✅ Xabaringiz adminlarga yuborildi. Javobni kuting.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="⬅️ Asosiy menyu")]],
+                resize_keyboard=True
+            )
+        )
+        await state.clear()
+        
+    except Exception as e:
+        logger.error(f"Contact admin error: {e}")
+        await message.answer("❌ Xabar yuborishda xatolik")
+
+# Admin reply handler
+@dp.message(F.reply_to_message, F.from_user.id.in_(Config.ADMIN_IDS))
+async def handle_admin_reply(message: types.Message):
+    try:
+        original_msg = message.reply_to_message
+        if not original_msg.text and not original_msg.caption:
+            return
+        
+        text = original_msg.text or original_msg.caption
+        if "👤 Foydalanuvchi:" not in text:
+            return
+        
+        # Extract user ID
+        lines = text.split('\n')
+        user_id = None
+        for line in lines:
+            if "🆔 ID:" in line:
+                user_id = int(line.split(":")[1].strip().replace('<code>', '').replace('</code>', ''))
+                break
+        
+        if not user_id:
+            await message.answer("❌ Foydalanuvchi ID topilmadi")
+            return
+        
+        # Send reply
+        reply_text = (
+            "📩 <b>Admin javobi:</b>\n\n"
+            f"{message.text}\n\n"
+            "💬 Qo'shimcha savollar bo'lsa, yozishingiz mumkin."
+        )
+        
+        try:
+            await bot.send_message(user_id, reply_text)
+            await message.answer("✅ Javob yuborildi!")
+        except Exception as e:
+            await message.answer(f"❌ Javob yuborish mumkin emas: {e}")
+            
+    except Exception as e:
+        logger.error(f"Admin reply error: {e}")
+        await message.answer("❌ Xatolik yuz berdi")
+
+# ========================
+# BOT MANAGEMENT
+# ========================
+
+async def on_startup():
+    """Initialize database and other resources"""
+    try:
+        db = Database()
+        logger.info("Bot ishga tushdi")
+        
+        # Send startup notification to admins
+        for admin_id in Config.ADMIN_IDS:
+            try:
+                await bot.send_message(
+                    admin_id,
+                    "🤖 Bot ishga tushdi va tayyor!"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to notify admin {admin_id}: {e}")
+    except Exception as e:
+        logger.critical(f"Startup failed: {e}")
+        raise
+
+async def on_shutdown():
+    """Cleanup resources"""
+    try:
+        db = Database()
+        db.close()
+        logger.info("Bot to'xtatildi")
+    except Exception as e:
+        logger.error(f"Shutdown error: {e}")
+
+async def main():
+    """Main bot function"""
+    await on_startup()
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await on_shutdown()
+
+if __name__ == '__main__':
+    asyncio.run(main())
