@@ -1,202 +1,53 @@
-import sqlite3
 import logging
-from datetime import datetime
 import asyncio
-from aiogram import Bot, Dispatcher, types, F, Router 
-from aiogram.filters import Command, CommandStart
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, Message, ForceReply
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters import Command
+from aiogram.types import (
+    ReplyKeyboardMarkup, 
+    KeyboardButton,
+    Message,
+    ReplyKeyboardRemove,
+    ForceReply
+)
+from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 from aiogram.enums import ParseMode
 
-# Enhanced configuration with type hints and better organization
+# Konfiguratsiya
 class Config:
     CHANNEL_USERNAME = "ajoyib_kino_kodlari1"
-    CHANNEL_LINK = f"https://t.me/{CHANNEL_USERNAME}"
+    CHANNEL_LINK = f"https://t.me/ajoyib_kino_kodlari1"
     CHANNEL_ID = -1002341118048
-    CHANNEL_USERNAME_sh = "+ZRxWtd33UQc5YzQy"  # Hidden channel
-    CHANNEL_LINK_sh = f"https://t.me/{CHANNEL_USERNAME_sh}"
-    CHANNEL_ID_sh = -1002537276349
+    
+    SECRET_CHANNEL_USERNAME = "maxfiy_kino_kanal"
+    SECRET_CHANNEL_LINK = f"https://t.me/maxfiy_kino_kanal"
+    SECRET_CHANNEL_ID = -1002537276349
+    
     BOT_TOKEN = "7808158374:AAGMY8mkb0HVi--N2aJyRrPxrjotI6rnm7k"
-    ADMIN_IDS = [7871012050, 7183540853]  # Admins list
-    BATCH_SIZE = 30  # For bulk operations
-    BATCH_DELAY = 1  # Delay between batches in seconds
+    ADMIN_IDS = [7871012050, 7183540853]
 
-# Improved logging setup
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('bot.log'),
-        logging.StreamHandler()
-    ]
-)
+# Botni ishga tushirish
+bot = Bot(token=Config.BOT_TOKEN, parse_mode=ParseMode.HTML)
+dp = Dispatcher()  # Endi faqat Dispatcher() deb chaqiramiz
+
+# Ma'lumotlar bazasi (vaqtincha)
+user_data = set()
+movies_db = {}
+current_movie_id = 1
+
+# Logging sozlamalari
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize bot with better error handling
-try:
-    bot = Bot(token=Config.BOT_TOKEN, parse_mode=ParseMode.HTML)
-    storage = MemoryStorage()
-    dp = Dispatcher(storage=storage)
-    router = Router()
-except Exception as e:
-    logger.critical(f"Failed to initialize bot: {e}")
-    raise
-
-# Database class with connection pooling and better error handling
-class Database:
-    _instance = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            try:
-                cls._instance.conn = sqlite3.connect(
-                    'kino.db',
-                    check_same_thread=False,
-                    timeout=30,
-                    isolation_level=None
-                )
-                cls._instance.conn.row_factory = sqlite3.Row
-                cls._instance.create_tables()
-                logger.info("Database connection established")
-            except sqlite3.Error as e:
-                logger.error(f"Database connection failed: {e}")
-                raise
-        return cls._instance
-
-    def create_tables(self):
-        """Create database tables with better schema"""
-        tables = [
-            '''CREATE TABLE IF NOT EXISTS kinolar (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                kod INTEGER UNIQUE,
-                nomi TEXT,
-                file_id TEXT,
-                kanal_msg_id INTEGER,
-                sana TEXT DEFAULT CURRENT_TIMESTAMP,
-                views INTEGER DEFAULT 0)''',
-                
-            '''CREATE TABLE IF NOT EXISTS adminlar (
-                user_id INTEGER PRIMARY KEY,
-                ism TEXT,
-                added_at TEXT DEFAULT CURRENT_TIMESTAMP)''',
-                
-            '''CREATE TABLE IF NOT EXISTS foydalanuvchilar (
-                user_id INTEGER PRIMARY KEY,
-                username TEXT,
-                full_name TEXT,
-                joined_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                last_active TEXT)''',
-                
-            '''CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                admin_id INTEGER,
-                message_text TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(user_id) REFERENCES foydalanuvchilar(user_id))'''
-        ]
-        
-        try:
-            with self.conn:
-                for table in tables:
-                    self.conn.execute(table)
-                
-                # Add default admin if not exists
-                for admin_id in Config.ADMIN_IDS:
-                    self.conn.execute(
-                        "INSERT OR IGNORE INTO adminlar (user_id, ism) VALUES (?, ?)", 
-                        (admin_id, "Admin")
-                    )
-                self.conn.commit()
-        except sqlite3.Error as e:
-            logger.error(f"Database table creation error: {e}")
-            raise
-
-    def add_user(self, user: types.User):
-        """Add user with complete info"""
-        try:
-            self.execute(
-                """INSERT OR IGNORE INTO foydalanuvchilar 
-                (user_id, username, full_name, last_active) 
-                VALUES (?, ?, ?, datetime('now'))""",
-                (user.id, user.username, user.full_name),
-                commit=True
-            )
-            # Update last active time
-            self.execute(
-                "UPDATE foydalanuvchilar SET last_active = datetime('now') WHERE user_id = ?",
-                (user.id,),
-                commit=True
-            )
-            return True
-        except sqlite3.Error as e:
-            logger.error(f"Add user error: {e}")
-            return False
-
-    def execute(self, query, params=(), fetchone=False, fetchall=False, commit=False):
-        """Improved execute with retry logic"""
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                cur = self.conn.cursor()
-                cur.execute(query, params)
-                if commit:
-                    self.conn.commit()
-                if fetchone:
-                    return cur.fetchone()
-                if fetchall:
-                    return cur.fetchall()
-                return None
-            except sqlite3.OperationalError as e:
-                if "locked" in str(e) and attempt < max_retries - 1:
-                    logger.warning(f"Database locked, retrying... (attempt {attempt + 1})")
-                    time.sleep(0.5)
-                    continue
-                logger.error(f"SQL Error: {e}")
-                return None
-            except sqlite3.Error as e:
-                logger.error(f"SQL Error: {e}")
-                return None
-
-    def close(self):
-        """Close connection properly"""
-        try:
-            if self.conn:
-                self.conn.close()
-                logger.info("Database connection closed")
-        except Exception as e:
-            logger.error(f"Error closing database: {e}")
-
-# States with better organization
-class AdminState(StatesGroup):
-    kino_nomi = State()
-    kino_qoshish = State()
-    kino_ochirish = State()
-    reklama = State()
-    contact_admin = State()
-    add_admin = State()
-    remove_admin = State()
-
-# Helper functions with better error handling
+# Obunani tekshirish funksiyasi
 async def check_subscription(user_id: int) -> bool:
-    """Check if user is subscribed to channel with retry logic"""
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            member = await bot.get_chat_member(chat_id=Config.CHANNEL_ID, user_id=user_id)
-            return member.status in ['member', 'administrator', 'creator']
-        except Exception as e:
-            if attempt == max_retries - 1:
-                logger.error(f"Subscription check failed: {e}")
-                return False
-            await asyncio.sleep(1)
+    try:
+        member = await bot.get_chat_member(Config.CHANNEL_ID, user_id)
+        return member.status in ['member', 'administrator', 'creator']
+    except Exception as e:
+        logger.error(f"Obunani tekshirishda xato: {e}")
+        return False
 
 async def ask_for_subscription(message: types.Message):
-    """Improved subscription request with better keyboard"""
     builder = InlineKeyboardBuilder()
     builder.button(text="📢 Kanalga o'tish", url=Config.CHANNEL_LINK)
     builder.button(text="✅ Obuna bo'ldim", callback_data="check_subscription")
@@ -205,549 +56,313 @@ async def ask_for_subscription(message: types.Message):
     await message.answer(
         "🤖 Botdan to'liq foydalanish uchun quyidagi kanalga obuna bo'ling:\n"
         f"{Config.CHANNEL_LINK}\n\n"
-        "Obuna bo'lgach, <b>'✅ Obuna bo'ldim'</b> tugmasini bosing.",
+        "Obuna bo'lgach, '✅ Obuna bo'ldim' tugmasini bosing.",
         reply_markup=builder.as_markup(),
         disable_web_page_preview=True
     )
 
-async def is_admin(user_id: int) -> bool:
-    """Check if user is admin with caching"""
-    return user_id in Config.ADMIN_IDS
-
-async def save_to_database(content_type: str, content_data: dict, code: int = None) -> bool:
-    """Generic content saving to database"""
-    db = Database()
-    try:
-        if content_type == "movie":
-            db.execute(
-                """INSERT INTO kinolar (kod, nomi, file_id) 
-                VALUES (?, ?, ?)""",
-                (code, content_data['nomi'], content_data['file_id']),
-                commit=True
-            )
-            return True
-        # Add other content types as needed
-    except Exception as e:
-        logger.error(f"Save to DB failed: {e}")
-        return False
-
-# ========================
-# HANDLERS IMPROVEMENTS
-# ========================
-
-@dp.message(CommandStart())
-async def start_cmd(message: types.Message):
-    """Enhanced start command with user tracking"""
-    user = message.from_user
-    db = Database()
-    
-    # Save/update user info
-    db.add_user(user)
-    
-    # Check subscription
-    if not await check_subscription(user.id):
-        await ask_for_subscription(message)
-        return
-    
-    # Welcome message with better formatting
-    welcome_msg = (
-        "🎉 <b>Botdan foydalanishga xush kelibsiz!</b>\n\n"
-        "Quyidagi menyudan kerakli bo'limni tanlang yoki kino kodini yuboring.\n\n"
-        f"🔍 Kino izlash uchun kodni yuboring\n"
-        f"📞 Savol uchun 'Adminga murojaat' tugmasini bosing\n\n"
-        f"📢 Bizning kanal: {Config.CHANNEL_LINK}"
-    )
-    
-    builder = ReplyKeyboardBuilder()
-    builder.button(text="📞 Adminga murojaat")
-    builder.adjust(2)
-    
-    await message.answer(welcome_msg, reply_markup=builder.as_markup(resize_keyboard=True))
-
 @dp.callback_query(F.data == "check_subscription")
 async def verify_subscription(query: types.CallbackQuery):
-    """Subscription verification with better flow"""
-    user = query.from_user
-    
-    if await check_subscription(user.id):
+    if await check_subscription(query.from_user.id):
         try:
             await query.message.delete()
         except Exception as e:
-            logger.warning(f"Message delete failed: {e}")
+            logger.warning(f"Xabarni o'chirishda xato: {e}")
         
         await query.answer("✅ Obuna tasdiqlandi!", show_alert=True)
         await start_cmd(query.message)
     else:
         await query.answer("❌ Obuna tasdiqlanmadi!", show_alert=True)
-        await ask_for_subscription(query.message)
 
-# Admin panel with more features
-@dp.message(Command("admin"))
-async def admin_panel(message: types.Message):
-    """Enhanced admin panel with more options"""
-    if not await is_admin(message.from_user.id):
-        await message.answer("⛔ Ruxsat yo'q!")
-        return
+@dp.message(Command("start"))
+async def start_cmd(message: types.Message):
+    user = message.from_user
+    user_data.add(user.id)
     
-    admin_menu = (
-        "👨‍💻 <b>Admin panel</b>\n\n"
-        "Quyidagi amallardan birini tanlang:"
-    )
+    if not await check_subscription(user.id):
+        await ask_for_subscription(message)
+        return
     
     builder = ReplyKeyboardBuilder()
-    builder.button(text="🎬 Kino qo'shish")
-    builder.button(text="🗑 Kino o'chirish")
-    builder.button(text="📊 Statistika")
-    builder.button(text="📢 Reklama yuborish")
-    builder.button(text="⬅️ Asosiy menyu")
-    builder.adjust(2, 2, 2)
+    builder.button(text="📞 Adminga murojaat")
     
-    await message.answer(admin_menu, reply_markup=builder.as_markup(resize_keyboard=True))
+    await message.answer(
+        f"👋 Salom, {user.full_name}!\n\n"
+        "🎥 Kino kodini yuboring yoki admin paneliga kirish uchun /admin buyrug'ini yuboring.",
+        reply_markup=builder.as_markup(resize_keyboard=True)
+    )
 
-# Movie addition with better flow
+# Admin paneli
+@dp.message(Command("admin"))
+async def admin_panel(message: types.Message):
+    if message.from_user.id not in Config.ADMIN_IDS:
+        await message.answer("❌ Siz admin emassiz!")
+        return
+
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🎬 Kino qo'shish")],
+            [KeyboardButton(text="❌ Kino o'chirish")],
+            [KeyboardButton(text="📊 Statistika")],
+            [KeyboardButton(text="📢 Reklama yuborish")],
+            [KeyboardButton(text="🏠 Asosiy menyu")]
+        ],
+        resize_keyboard=True,
+    )
+
+    await message.answer("👋 Admin paneliga xush kelibsiz!", reply_markup=keyboard)
+
+# Kino qo'shish funksiyalari
 @dp.message(F.text == "🎬 Kino qo'shish")
-async def start_add_movie(message: types.Message, state: FSMContext):
-    if not await is_admin(message.from_user.id):
+async def start_adding_movie(message: Message):
+    if message.from_user.id not in Config.ADMIN_IDS:
         return
     
     await message.answer(
-        "🎥 <b>Yangi kino qo'shish</b>\n\n"
-        "Kino nomini yuboring:",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="◀️ Ortga")]],
-            resize_keyboard=True
-        )
+        "📤 Kino qo'shish uchun video yoki fayl yuboring.\n\n"
+        "❗ Eslatma: Kino avtomatik ravishda maxfiy kanalga joylanadi va raqam beriladi.",
+        reply_markup=ReplyKeyboardRemove()
     )
-    await state.set_state(AdminState.kino_nomi)
 
-@dp.message(AdminState.kino_nomi)
-async def process_movie_name(message: types.Message, state: FSMContext):
-    if message.text == "◀️ Ortga":
-        await state.clear()
-        await admin_panel(message)
+@dp.message(F.from_user.id.in_(Config.ADMIN_IDS) & (F.video | F.document))
+async def handle_new_movie(message: Message):
+    global current_movie_id
+    
+    if message.video:
+        file_id = message.video.file_id
+        file_type = "video"
+    elif message.document:
+        file_id = message.document.file_id
+        file_type = "document"
+    else:
         return
     
-    await state.update_data(nomi=message.text)
-    await message.answer(
-        "📹 Endi kino videosini yuboring:",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="◀️ Ortga")]],
-            resize_keyboard=True
-        )
-    )
-    await state.set_state(AdminState.kino_qoshish)
-
-@dp.message(AdminState.kino_qoshish)
-async def process_movie(message: types.Message, state: FSMContext):
-    if message.text == "◀️ Ortga":
-        await state.clear()
-        await admin_panel(message)
-        return
-
-    if not message.video:
-        await message.answer("❌ Faqat video qabul qilinadi!")
-        return
-    
-    data = await state.get_data()
-    nomi = data.get("nomi", "Nomsiz")
-    
-    # Generate new code
-    db = Database()
-    new_code = db.execute("SELECT MAX(kod) FROM kinolar", fetchone=True)[0] or 1000
-    new_code += 1
-    
-    # Save to channel and database
-    try:
-        # Post to main channel
-        bot_username = (await bot.get_me()).username
-        caption = (
-            f"🎬 <b>{nomi}</b>\n\n"
-            f"🔢 Kodi: <code>{new_code}</code>\n\n"
-            f"📥 @{bot_username} orqali yuklab olish mumkin\n"
-            f"🔗 Kanal: {Config.CHANNEL_LINK}"
-        )
-        
-        msg = await bot.send_message(
-            chat_id=Config.CHANNEL_ID_sh,
-            text=caption
-        )
-        
-        await bot.send_video(
-            chat_id=Config.CHANNEL_ID_sh,
-            video=message.video.file_id,
-            reply_to_message_id=msg.message_id,
-            caption=caption
-        )
-        
-        # Save to database
-        db.execute(
-            "INSERT INTO kinolar (kod, nomi, file_id, kanal_msg_id) VALUES (?, ?, ?, ?)",
-            (new_code, nomi, message.video.file_id, msg.message_id),
-            commit=True
-        )
-        
-        # Success message
-        success_msg = (
-            f"✅ <b>Kino muvaffaqiyatli qo'shildi!</b>\n\n"
-            f"📝 Nomi: {nomi}\n"
-            f"🔢 Kodi: <code>{new_code}</code>\n"
-            f"🔗 <a href='https://t.me/{Config.CHANNEL_USERNAME}/{msg.message_id}'>Kanaldagi post</a>"
-        )
-        await message.answer(success_msg)
-        
-    except Exception as e:
-        logger.error(f"Movie addition failed: {e}")
-        await message.answer(f"❌ Xatolik: {str(e)}")
-    
-    await state.clear()
-
-@dp.message(F.text == "🗑 Kino o'chirish")
-async def start_delete_movie(message: types.Message, state: FSMContext):
-    if not await is_admin(message.from_user.id):
-        return
-    
-    await message.answer("O'chirmoqchi bo'lgan kino kodini yuboring:")
-    await state.set_state(AdminState.kino_ochirish)
-
-@dp.message(AdminState.kino_ochirish)
-async def process_delete_movie(message: types.Message, state: FSMContext):
-    if not message.text.isdigit():
-        await message.answer("❌ Iltimos, faqat raqam yuboring!")
-        return
-    
-    kod = int(message.text)
-    db = Database()
+    caption = message.caption if message.caption else f"🎬 Kino {current_movie_id}"
     
     try:
-        result = db.execute("SELECT kanal_msg_id FROM kinolar WHERE kod=?", (kod,), fetchone=True)
-        
-        if result:
-            try:
-                await bot.delete_message(chat_id=f"@{Config.CHANNEL_USERNAME}", message_id=result["kanal_msg_id"])
-            except Exception as e:
-                logger.warning(f"Error deleting channel message: {e}")
-            
-            db.execute("DELETE FROM kinolar WHERE kod=?", (kod,), commit=True)
-            await message.answer(f"✅ {kod}-kodli kino muvaffaqiyatli o'chirildi!")
+        if file_type == "video":
+            sent_msg = await bot.send_video(Config.SECRET_CHANNEL_ID, file_id, caption=caption)
         else:
-            await message.answer("❌ Bunday kodli kino topilmadi!")
-    
+            sent_msg = await bot.send_document(Config.SECRET_CHANNEL_ID, file_id, caption=caption)
+        
+        movies_db[str(current_movie_id)] = {
+            "file_id": file_id,
+            "file_type": file_type,
+            "caption": caption,
+            "message_id": sent_msg.message_id
+        }
+        
+        await message.answer(
+            f"✅ Kino #{current_movie_id} muvaffaqiyatli qo'shildi!\n\n"
+            f"📝 Sarlavha: {caption}\n"
+            f"🔗 Kanaldagi xabar: https://t.me/{Config.SECRET_CHANNEL_USERNAME}/{sent_msg.message_id}",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="🏠 Admin panel")]],
+                resize_keyboard=True
+            )
+        )
+        
+        current_movie_id += 1
+        
     except Exception as e:
-        await message.answer(f"❌ Xatolik yuz berdi: {str(e)}")
-    
-    finally:
-        await state.clear()
+        logger.error(f"Kino qo'shishda xato: {e}")
+        await message.answer("❌ Kino qo'shishda xatolik yuz berdi. Iltimos, qayta urunib ko'ring.")
 
-# Statistics with more details
-@dp.message(F.text == "📊 Statistika")
-async def show_stats(message: types.Message):
-    if not await is_admin(message.from_user.id):
+# Kino o'chirish funksiyalari
+@dp.message(F.text == "❌ Kino o'chirish")
+async def start_removing_movie(message: Message):
+    if message.from_user.id not in Config.ADMIN_IDS:
         return
     
-    db = Database()
+    if not movies_db:
+        await message.answer("⚠️ Hozircha hech qanday kino mavjud emas!")
+        return
+    
+    movies_list = "\n".join([f"{id}: {data['caption']}" for id, data in movies_db.items()])
+    
+    await message.answer(
+        f"🗑 O'chirish uchun kino raqamini yuboring:\n\n"
+        f"{movies_list}\n\n"
+        "❗ Eslatma: Kino kanaldan ham o'chib ketadi!",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="🔙 Orqaga")]],
+            resize_keyboard=True
+        )
+    )
+
+@dp.message(F.from_user.id.in_(Config.ADMIN_IDS) & F.text.regexp(r'^\d+$'))
+async def remove_movie(message: Message):
+    movie_id = message.text.strip()
+    
+    if movie_id not in movies_db:
+        await message.answer("❌ Bunday raqamdagi kino topilmadi!")
+        return
     
     try:
-        # Get movie stats
-        movie_stats = db.execute(
-            "SELECT COUNT(*) as count, MIN(sana) as first_date, MAX(sana) as last_date FROM kinolar",
-            fetchone=True
-        )
+        await bot.delete_message(Config.SECRET_CHANNEL_ID, movies_db[movie_id]["message_id"])
+        del movies_db[movie_id]
         
-        # Get user stats
-        user_stats = db.execute(
-            "SELECT COUNT(*) as total, "
-            "SUM(CASE WHEN last_active > datetime('now', '-1 day') THEN 1 ELSE 0 END) as active_today "
-            "FROM foydalanuvchilar",
-            fetchone=True
+        await message.answer(
+            f"✅ Kino #{movie_id} muvaffaqiyatli o'chirildi!",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="🏠 Admin panel")]],
+                resize_keyboard=True
+            )
         )
-        
-        # Format stats message
-        stats_msg = (
-            "📊 <b>Bot statistikasi</b>\n\n"
-            "🎬 <b>Kinolar:</b>\n"
-            f"• Jami: {movie_stats['count']}\n"
-            f"• Birinchi: {movie_stats['first_date'] or 'N/A'}\n"
-            f"• Oxirgi: {movie_stats['last_date'] or 'N/A'}\n\n"
-            "👥 <b>Foydalanuvchilar:</b>\n"
-            f"• Jami: {user_stats['total']}\n"
-            f"• Faol (24 soat): {user_stats['active_today']}\n\n"
-            f"🔗 Kanal: {Config.CHANNEL_LINK}"
-        )
-        
-        await message.answer(stats_msg)
         
     except Exception as e:
-        logger.error(f"Stats error: {e}")
-        await message.answer("❌ Statistika olishda xatolik")
+        logger.error(f"Kino o'chirishda xato: {e}")
+        await message.answer("❌ Kino o'chirishda xatolik yuz berdi. Iltimos, qayta urunib ko'ring.")
 
-# Enhanced advertisement sending
-@dp.message(F.text == "📢 Reklama yuborish")
-async def start_advertisement(message: types.Message, state: FSMContext):
-    if not await is_admin(message.from_user.id):
-        return
+# Foydalanuvchilarga kinolarni yuborish
+@dp.message(F.text.regexp(r'^\d+$') & ~F.from_user.id.in_(Config.ADMIN_IDS))
+async def send_movie_to_user(message: Message):
+    movie_id = message.text.strip()
     
-    await message.answer(
-        "✍️ Reklama matnini yuboring yoki media (rasm, video, fayl) jo'nating:",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="◀️ Ortga")]],
-            resize_keyboard=True
-        )
-    )
-    await state.set_state(AdminState.reklama)
-
-@dp.message(AdminState.reklama)
-async def send_advertisement(message: types.Message, state: FSMContext):
-    if message.text == "◀️ Ortga":
-        await state.clear()
-        await admin_panel(message)
-        return
-    
-    # Prepare content
-    content = {
-        'type': message.content_type,
-        'text': message.text or message.caption or "",
-        'file_id': getattr(message, message.content_type).file_id if message.content_type != 'text' else None
-    }
-    
-    # Get all users
-    db = Database()
-    users = [row['user_id'] for row in db.execute("SELECT user_id FROM foydalanuvchilar", fetchall=True)]
-    
-    if not users:
-        await message.answer("⚠️ Hozircha foydalanuvchilar yo'q!")
-        return
-    
-    # Send with progress
-    total = len(users)
-    success = 0
-    progress_msg = await message.answer(f"📤 Yuborilmoqda... 0/{total} (0%)")
-    
-    for i, user_id in enumerate(users, 1):
-        try:
-            if content['type'] == 'text':
-                await bot.send_message(user_id, content['text'])
-            else:
-                method = getattr(bot, f"send_{content['type']}")
-                await method(user_id, content['file_id'], caption=content['text'])
-            success += 1
-        except Exception as e:
-            logger.warning(f"Failed to send to {user_id}: {e}")
-        
-        # Update progress every 10 users or last one
-        if i % 10 == 0 or i == total:
-            percent = int((i / total) * 100)
-            await progress_msg.edit_text(
-                f"📤 Yuborilmoqda... {i}/{total} ({percent}%)\n"
-                f"✅ Muvaffaqiyatli: {success}\n"
-                f"❌ Xatolar: {i - success}"
-            )
-            await asyncio.sleep(Config.BATCH_DELAY)
-    
-    # Final report
-    await progress_msg.delete()
-    await message.answer(
-        f"✅ Reklama yuborish yakunlandi!\n\n"
-        f"📊 Natijalar:\n"
-        f"• Jami: {total}\n"
-        f"• Muvaffaqiyatli: {success}\n"
-        f"• Xatolar: {total - success}",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="⬅️ Asosiy menyu")]],
-            resize_keyboard=True
-        )
-    )
-    await state.clear()
-
-
-# Movie search by code
-@dp.message(lambda message: message.text.isdigit())
-async def send_movie_by_code(message: types.Message):
-    # Check subscription first
     if not await check_subscription(message.from_user.id):
         await ask_for_subscription(message)
         return
     
-    code = int(message.text)
-    db = Database()
-    movie = db.execute("SELECT nomi, file_id FROM kinolar WHERE kod = ?", (code,), fetchone=True)
-    
-    if not movie:
-        await message.answer(
-            f"❌ {code}-kodli kino topilmadi!\n\n"
-            f"🔍 Kanalda barcha kinolar: {Config.CHANNEL_LINK}",
-            disable_web_page_preview=True
-        )
+    if movie_id not in movies_db:
+        await message.answer("❌ Bunday raqamdagi kino topilmadi!")
         return
     
-    # Send movie
+    movie = movies_db[movie_id]
+    
     try:
-        await message.answer_video(
-            video=movie['file_id'],
-            caption=f"🎬 <b>{movie['nomi']}</b>\n\n🔢 Kodi: <code>{code}</code>"
-        )
-        # Increment view count
-        db.execute("UPDATE kinolar SET views = views + 1 WHERE kod = ?", (code,), commit=True)
+        if movie["file_type"] == "video":
+            await message.answer_video(movie["file_id"], caption=movie["caption"])
+        else:
+            await message.answer_document(movie["file_id"], caption=movie["caption"])
     except Exception as e:
-        logger.error(f"Movie send failed: {e}")
-        await message.answer("❌ Kino yuborishda xatolik")
+        logger.error(f"Kino yuborishda xato: {e}")
+        await message.answer("❌ Kino yuborishda xatolik yuz berdi. Iltimos, keyinroq urunib ko'ring.")
 
-# Contact admin with better tracking
+# Qolgan funksiyalar (adminga murojaat, statistika, reklama)
 @dp.message(F.text == "📞 Adminga murojaat")
-async def contact_admin(message: types.Message, state: FSMContext):
+async def contact_admin(message: Message):
     await message.answer(
-        "✍️ Xabaringizni yuboring (matn, rasm, video yoki fayl):\n\n"
-        "Adminlar tez orada javob berishadi.",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="◀️ Bekor qilish")]],
-            resize_keyboard=True
-        )
+        "✍️ Adminga xabar yuborish uchun matn, rasm, video yoki fayl yuboring.\n\n"
+        "Yoki to'g'ridan-to'g'ri @admin ga yozishingiz mumkin.",
+        reply_markup=ReplyKeyboardRemove()
     )
-    await state.set_state(AdminState.contact_admin)
 
-@dp.message(AdminState.contact_admin)
-async def forward_to_admin(message: types.Message, state: FSMContext):
-    if message.text == "◀️ Bekor qilish":
-        await state.clear()
-        await start_cmd(message)
-        return
-    
-    user = message.from_user
-    user_info = (
-        f"👤 <b>Foydalanuvchi:</b> {user.full_name}\n"
-        f"🆔 ID: <code>{user.id}</code>\n"
-        f"📅 Sana: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
-    )
-    
+@dp.message(F.chat.type == "private", ~F.from_user.id.in_(Config.ADMIN_IDS))
+async def user_to_admin(message: Message):
     try:
+        user_info = (
+            f"👤 Foydalanuvchi: {message.from_user.full_name}\n"
+            f"🆔 ID: {message.from_user.id}\n"
+            f"📅 Sana: {message.date.strftime('%Y-%m-%d %H:%M')}\n\n"
+        )
+        
         if message.text:
             caption = f"{user_info}📝 Xabar: {message.text}"
-            content = {'type': 'text', 'text': caption}
+            for admin_id in Config.ADMIN_IDS:
+                await bot.send_message(admin_id, caption, reply_markup=ForceReply())
+        
         elif message.photo:
             caption = f"{user_info}📷 Rasm"
-            content = {'type': 'photo', 'file_id': message.photo[-1].file_id, 'caption': caption}
+            for admin_id in Config.ADMIN_IDS:
+                await bot.send_photo(admin_id, message.photo[-1].file_id, 
+                                   caption=caption, 
+                                   reply_markup=ForceReply())
+        
         elif message.video:
             caption = f"{user_info}🎥 Video"
-            content = {'type': 'video', 'file_id': message.video.file_id, 'caption': caption}
+            for admin_id in Config.ADMIN_IDS:
+                await bot.send_video(admin_id, message.video.file_id, 
+                                   caption=caption, 
+                                   reply_markup=ForceReply())
+        
         elif message.document:
             caption = f"{user_info}📄 Fayl: {message.document.file_name}"
-            content = {'type': 'document', 'file_id': message.document.file_id, 'caption': caption}
-        else:
-            await message.answer("❌ Qabul qilinmaydigan format")
-            return
+            for admin_id in Config.ADMIN_IDS:
+                await bot.send_document(admin_id, message.document.file_id, 
+                                      caption=caption, 
+                                      reply_markup=ForceReply())
         
-        # Forward to all admins
-        for admin_id in Config.ADMIN_IDS:
-            try:
-                if content['type'] == 'text':
-                    await bot.send_message(
-                        admin_id,
-                        content['text'],
-                        reply_markup=ForceReply()
-                    )
-                else:
-                    method = getattr(bot, f"send_{content['type']}")
-                    await method(
-                        admin_id,
-                        content['file_id'],
-                        caption=content.get('caption'),
-                        reply_markup=ForceReply()
-                    )
-            except Exception as e:
-                logger.error(f"Failed to forward to admin {admin_id}: {e}")
-        
-        await message.answer(
-            "✅ Xabaringiz adminlarga yuborildi. Javobni kuting.",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="⬅️ Asosiy menyu")]],
-                resize_keyboard=True
-            )
-        )
-        await state.clear()
-        
+        await message.answer("✅ Xabaringiz adminlarga yuborildi. Javobni kuting.")
+    
     except Exception as e:
-        logger.error(f"Contact admin error: {e}")
-        await message.answer("❌ Xabar yuborishda xatolik")
+        logger.error(f"Xabar yuborishda xato: {e}")
+        await message.answer("❌ Xabar yuborishda xatolik yuz berdi. Iltimos, keyinroq urunib ko'ring.")
 
-# Admin reply handler
 @dp.message(F.reply_to_message, F.from_user.id.in_(Config.ADMIN_IDS))
-async def handle_admin_reply(message: types.Message):
+async def admin_to_user(message: Message):
     try:
-        original_msg = message.reply_to_message
-        if not original_msg.text and not original_msg.caption:
-            return
+        original_msg = message.reply_to_message.text or message.reply_to_message.caption
         
-        text = original_msg.text or original_msg.caption
-        if "👤 Foydalanuvchi:" not in text:
-            return
-        
-        # Extract user ID
-        lines = text.split('\n')
-        user_id = None
-        for line in lines:
-            if "🆔 ID:" in line:
-                user_id = int(line.split(":")[1].strip().replace('<code>', '').replace('</code>', ''))
-                break
-        
-        if not user_id:
-            await message.answer("❌ Foydalanuvchi ID topilmadi")
-            return
-        
-        # Send reply
-        reply_text = (
-            "📩 <b>Admin javobi:</b>\n\n"
-            f"{message.text}\n\n"
-            "💬 Qo'shimcha savollar bo'lsa, yozishingiz mumkin."
-        )
-        
-        try:
-            await bot.send_message(user_id, reply_text)
-            await message.answer("✅ Javob yuborildi!")
-        except Exception as e:
-            await message.answer(f"❌ Javob yuborish mumkin emas: {e}")
+        if original_msg and "👤 Foydalanuvchi:" in original_msg:
+            user_id_line = next(line for line in original_msg.split('\n') if "🆔 ID:" in line)
+            user_id = int(user_id_line.split(":")[1].strip())
             
+            reply_text = (
+                "📩 Admin javobi:\n\n"
+                f"{message.text}\n\n"
+                "💬 Savolingiz bo'lsa, yana yozishingiz mumkin."
+            )
+            await bot.send_message(user_id, reply_text)
+            await message.answer("✅ Javob foydalanuvchiga yuborildi.")
+    
     except Exception as e:
-        logger.error(f"Admin reply error: {e}")
-        await message.answer("❌ Xatolik yuz berdi")
+        logger.error(f"Javob yuborishda xato: {e}")
+        await message.answer("❌ Javob yuborishda xatolik. Foydalanuvchi ID topilmadi.")
 
-# ========================
-# BOT MANAGEMENT
-# ========================
+@dp.message(F.text == "📊 Statistika")
+async def show_statistics(message: types.Message):
+    if message.from_user.id not in Config.ADMIN_IDS:
+        await message.answer("❌ Siz admin emassiz!")
+        return
 
-async def on_startup():
-    """Initialize database and other resources"""
-    try:
-        db = Database()
-        logger.info("Bot ishga tushdi")
-        
-        # Send startup notification to admins
-        for admin_id in Config.ADMIN_IDS:
-            try:
-                await bot.send_message(
-                    admin_id,
-                    "🤖 Bot ishga tushdi va tayyor!"
-                )
-            except Exception as e:
-                logger.warning(f"Failed to notify admin {admin_id}: {e}")
-    except Exception as e:
-        logger.critical(f"Startup failed: {e}")
-        raise
+    total_users = len(user_data)
+    total_movies = len(movies_db)
+    
+    await message.answer(
+        f"📊 Bot statistikasi:\n\n"
+        f"👤 Foydalanuvchilar soni: {total_users}\n"
+        f"🎬 Kinolar soni: {total_movies}"
+    )
 
-async def on_shutdown():
-    """Cleanup resources"""
-    try:
-        db = Database()
-        db.close()
-        logger.info("Bot to'xtatildi")
-    except Exception as e:
-        logger.error(f"Shutdown error: {e}")
+@dp.message(F.text == "📢 Reklama yuborish")
+async def ask_for_advertisement(message: Message):
+    if message.from_user.id not in Config.ADMIN_IDS:
+        return
+    
+    await message.answer("✍️ Reklama uchun matn, rasm, video yoki fayl yuboring.")
+
+@dp.message(F.from_user.id.in_(Config.ADMIN_IDS))
+async def send_advertisement(message: Message):
+    if not user_data:
+        await message.answer("⚠️ Hozircha hech qanday foydalanuvchi yo'q!")
+        return
+
+    success, failed = 0, 0
+
+    for user_id in user_data:
+        try:
+            if message.text:
+                await bot.send_message(user_id, message.text)
+            elif message.photo:
+                await bot.send_photo(user_id, message.photo[-1].file_id, caption=message.caption)
+            elif message.video:
+                await bot.send_video(user_id, message.video.file_id, caption=message.caption)
+            elif message.document:
+                await bot.send_document(user_id, message.document.file_id, caption=message.caption)
+            success += 1
+        except Exception as e:
+            logger.error(f"Xabar yuborilmadi (User ID: {user_id}): {e}")
+            failed += 1
+
+    await message.answer(f"✅ Reklama {success} ta foydalanuvchiga yuborildi!\n❌ Xatoliklar: {failed}")
+
+@dp.message(F.text == "🏠 Asosiy menyu")
+async def back_to_main_menu(message: types.Message):
+    await start_cmd(message)
 
 async def main():
-    """Main bot function"""
-    await on_startup()
-    try:
-        await dp.start_polling(bot)
-    finally:
-        await on_shutdown()
+    logger.info("Bot ishga tushmoqda...")
+    await dp.start_polling(bot)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())
