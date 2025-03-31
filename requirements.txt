@@ -1,3 +1,5 @@
-aiogram==3.0.0
-python-dotenv==1.0.0
-sqlalchemy==2.0.23
+aiogram==3.0.0b7
+python-dotenv>=0.19.0
+loguru>=0.6.0
+python-dateutil>=2.8.2
+pytz>=2021.3
